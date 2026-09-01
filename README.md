@@ -15,7 +15,7 @@ pi install npm:pi-goal
 Or from git:
 
 ```bash
-pi install git:github.com/Michaelliv/pi-goal
+pi install git:github.com/flamingoosesoftwareinc/pi-goal
 ```
 
 ## Usage
