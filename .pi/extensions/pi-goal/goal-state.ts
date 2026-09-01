@@ -40,6 +40,24 @@ export function normalizeTokenBudget(value: unknown): { tokenBudget: number | nu
 	return { tokenBudget };
 }
 
+export function parseCadence(value: string): { cadenceMs: number; error?: string } {
+	const match = value.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m)$/);
+	if (!match) return { cadenceMs: 0, error: "Cadence must be a non-negative duration such as 500ms, 5s, or 1m." };
+	const amount = Number(match[1]);
+	const multiplier = match[2] === "m" ? 60_000 : match[2] === "s" ? 1_000 : 1;
+	const cadenceMs = Math.round(amount * multiplier);
+	if (!Number.isFinite(cadenceMs) || cadenceMs < 0) {
+		return { cadenceMs: 0, error: "Cadence must be a non-negative duration such as 500ms, 5s, or 1m." };
+	}
+	return { cadenceMs };
+}
+
+export function formatCadence(cadenceMs: number): string {
+	if (cadenceMs >= 60_000 && cadenceMs % 60_000 === 0) return `${cadenceMs / 60_000}m`;
+	if (cadenceMs >= 1_000 && cadenceMs % 1_000 === 0) return `${cadenceMs / 1_000}s`;
+	return `${cadenceMs}ms`;
+}
+
 export function formatTokens(value: number): string {
 	if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`;
 	if (value >= 1_000) return `${Math.round(value / 100) / 10}K`;

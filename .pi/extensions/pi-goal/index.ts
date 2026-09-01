@@ -5,7 +5,9 @@ import {
 	createGoalState,
 	goalEventStatus,
 	goalUsage,
+	formatCadence,
 	parseTokenBudget,
+	parseCadence,
 	statusLine,
 	truncateObjective,
 	type GoalEventKind,
@@ -23,6 +25,8 @@ let statusBarEnabled = true;
 let activeTurnStartedAt: number | null = null;
 let activeGoalThisTurnId: string | null = null;
 let continuationQueued = false;
+let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+let continuationCadenceMs = 5_000;
 
 // The `content` field is what the LLM sees in the conversation history.
 // Every goal event MUST carry actionable text — never a cryptic marker.
@@ -69,7 +73,7 @@ function emitGoalEvent(
 	);
 }
 
-function latestStateFromSession(ctx: ExtensionContext): { goal: GoalState | null; statusBarEnabled: boolean } {
+function latestStateFromSession(ctx: ExtensionContext): { goal: GoalState | null; statusBarEnabled: boolean; continuationCadenceMs: number } {
 	const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i] as any;
@@ -77,17 +81,18 @@ function latestStateFromSession(ctx: ExtensionContext): { goal: GoalState | null
 			return {
 				goal: entry.data?.goal ?? null,
 				statusBarEnabled: entry.data?.statusBarEnabled ?? true,
+				continuationCadenceMs: entry.data?.continuationCadenceMs ?? 5_000,
 			};
 		}
 	}
-	return { goal: null, statusBarEnabled: true };
+	return { goal: null, statusBarEnabled: true, continuationCadenceMs: 5_000 };
 }
 
 function updateStatusBar(ctx: ExtensionContext) {
 	ctx.ui.setStatus(CUSTOM_TYPE, statusBarEnabled ? statusLine(goal) ?? "" : "");
 }
 
-const ACTIVE_GOAL_TOOL_NAMES = ["get_goal", "update_goal"];
+const ACTIVE_GOAL_TOOL_NAMES = ["get_goal", "set_goal_cadence", "update_goal"];
 
 // Expose read/update tools to the LLM only while a goal is actively being pursued.
 // Keep create_goal available so the model can set or replace a goal when explicitly asked.
@@ -102,15 +107,15 @@ function syncGoalTools(pi: ExtensionAPI) {
 function persist(pi: ExtensionAPI, ctx: ExtensionContext, next: GoalState | null) {
 	goal = next;
 	if (next?.status !== "active") {
-		continuationQueued = false;
+		cancelContinuation();
 	}
-	pi.appendEntry(CUSTOM_TYPE, { goal: next, statusBarEnabled });
+	pi.appendEntry(CUSTOM_TYPE, { goal: next, statusBarEnabled, continuationCadenceMs });
 	updateStatusBar(ctx);
 	syncGoalTools(pi);
 }
 
 function persistSettings(pi: ExtensionAPI, ctx: ExtensionContext) {
-	pi.appendEntry(CUSTOM_TYPE, { goal, statusBarEnabled });
+	pi.appendEntry(CUSTOM_TYPE, { goal, statusBarEnabled, continuationCadenceMs });
 	updateStatusBar(ctx);
 }
 
@@ -166,14 +171,22 @@ The system has marked the goal as budget_limited, so do not start new substantiv
 Do not call update_goal unless the goal is actually complete.`;
 }
 
-function queueContinuation(pi: ExtensionAPI, state: GoalState) {
-	if (continuationQueued || state.status !== "active") return;
+function cancelContinuation() {
+	if (continuationTimer) clearTimeout(continuationTimer);
+	continuationTimer = null;
+	continuationQueued = false;
+}
+
+function queueContinuation(pi: ExtensionAPI, state: GoalState, ctx: ExtensionContext) {
+	if (state.status !== "active") return;
+	cancelContinuation();
 	continuationQueued = true;
-	queueMicrotask(() => {
+	continuationTimer = setTimeout(() => {
+		continuationTimer = null;
 		continuationQueued = false;
-		if (!goal || goal.id !== state.id || goal.status !== "active") return;
+		if (!goal || goal.id !== state.id || goal.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
 		emitGoalEvent(pi, "continuation", goal, { triggerTurn: true, deliverAs: "followUp" });
-	});
+	}, continuationCadenceMs);
 }
 
 export default function piGoal(pi: ExtensionAPI) {
@@ -267,6 +280,43 @@ export default function piGoal(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		name: "set_goal_cadence",
+		label: "Set Goal Cadence",
+		description: "Set the trailing-edge delay before this active goal continues after the agent settles.",
+		promptSnippet: "Adjust the active goal continuation cadence when delayed follow-up prevents competing turns",
+		promptGuidelines: [
+			"Use set_goal_cadence when the user requests a cadence or when active asynchronous work needs more time to settle before another goal turn.",
+			"Do not use cadence as a substitute for pausing a goal that should not continue.",
+		],
+		parameters: {
+			type: "object",
+			properties: {
+				cadence: {
+					type: "string",
+					description: "A non-negative duration such as 500ms, 5s, or 1m.",
+				},
+			},
+			required: ["cadence"],
+			additionalProperties: false,
+		} as any,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (!goal || goal.status !== "active") {
+				return { content: [{ type: "text", text: "No active goal is set." }], isError: true };
+			}
+			const parsed = parseCadence(typeof params.cadence === "string" ? params.cadence : "");
+			if (parsed.error) {
+				return { content: [{ type: "text", text: parsed.error }], isError: true };
+			}
+			continuationCadenceMs = parsed.cadenceMs;
+			persistSettings(pi, ctx);
+			return {
+				content: [{ type: "text", text: JSON.stringify({ cadence: formatCadence(continuationCadenceMs), cadenceMs: continuationCadenceMs }, null, 2) }],
+				details: { cadenceMs: continuationCadenceMs },
+			};
+		},
+	});
+
+	pi.registerTool({
 		name: "update_goal",
 		label: "Update Goal",
 		description: "Mark the current thread goal complete. This tool only accepts status=complete and final turn usage is accounted by the runtime.",
@@ -308,7 +358,7 @@ export default function piGoal(pi: ExtensionAPI) {
 	pi.registerCommand("goal", {
 		description: "Set, view, pause, resume, clear, or configure a long-running goal",
 		getArgumentCompletions: (prefix) => {
-			const values = ["pause", "resume", "clear", "status", "statusbar", "statusbar on", "statusbar off"];
+			const values = ["pause", "resume", "clear", "status", "statusbar", "statusbar on", "statusbar off", "cadence", "cadence 5s"];
 			const filtered = values.filter((value) => value.startsWith(prefix));
 			return filtered.length ? filtered.map((value) => ({ value, label: value })) : null;
 		},
@@ -318,7 +368,24 @@ export default function piGoal(pi: ExtensionAPI) {
 
 			if (!trimmed || trimmed === "status") {
 				if (!goal) ctx.ui.notify("Usage: /goal [--tokens 50k] <objective>", "info");
-				else ctx.ui.notify(`${statusLine(goal)}\nObjective: ${goal.objective}\nStatus bar: ${statusBarEnabled ? "on" : "off"}`, "info");
+				else ctx.ui.notify(`${statusLine(goal)}\nObjective: ${goal.objective}\nCadence: ${formatCadence(continuationCadenceMs)}\nStatus bar: ${statusBarEnabled ? "on" : "off"}`, "info");
+				return;
+			}
+
+			if (trimmed === "cadence" || trimmed.startsWith("cadence ")) {
+				const value = trimmed.slice("cadence".length).trim();
+				if (!value) {
+					ctx.ui.notify(`Goal cadence is ${formatCadence(continuationCadenceMs)}.`, "info");
+					return;
+				}
+				const parsed = parseCadence(value);
+				if (parsed.error) {
+					ctx.ui.notify(parsed.error, "warning");
+					return;
+				}
+				continuationCadenceMs = parsed.cadenceMs;
+				persistSettings(pi, ctx);
+				ctx.ui.notify(`Goal cadence set to ${formatCadence(continuationCadenceMs)}.`, "info");
 				return;
 			}
 
@@ -350,7 +417,7 @@ export default function piGoal(pi: ExtensionAPI) {
 				const next = { ...goal, status, updatedAt: now };
 				persist(pi, ctx, next);
 				emitGoalEvent(pi, status === "active" ? "resumed" : "paused", next);
-				if (status === "active" && ctx.isIdle()) queueContinuation(pi, next);
+				if (status === "active" && ctx.isIdle()) queueContinuation(pi, next, ctx);
 				return;
 			}
 
@@ -377,7 +444,8 @@ export default function piGoal(pi: ExtensionAPI) {
 		const restored = latestStateFromSession(ctx);
 		goal = restored.goal;
 		statusBarEnabled = restored.statusBarEnabled;
-		continuationQueued = false;
+		continuationCadenceMs = restored.continuationCadenceMs;
+		cancelContinuation();
 		activeTurnStartedAt = null;
 		activeGoalThisTurnId = null;
 		// Keep create_goal available, and hide read/update tools unless there is an active goal to pursue.
@@ -428,8 +496,11 @@ export default function piGoal(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_settled", (_event, ctx) => {
 		if (!goal || goal.status !== "active" || ctx.hasPendingMessages()) return;
-		queueContinuation(pi, goal);
+		queueContinuation(pi, goal, ctx);
 	});
+
+	pi.on("input", () => cancelContinuation());
+	pi.on("session_shutdown", () => cancelContinuation());
 }

@@ -12,9 +12,19 @@ const {
 	goalUsage,
 	normalizeTokenBudget,
 	parseTokenBudget,
+	parseCadence,
+	formatCadence,
 	statusLine,
 	truncateObjective,
 } = jiti("../.pi/extensions/pi-goal/goal-state.ts");
+
+test("parseCadence accepts milliseconds, seconds, and minutes", () => {
+	assert.deepEqual(parseCadence("500ms"), { cadenceMs: 500 });
+	assert.deepEqual(parseCadence("2.5s"), { cadenceMs: 2500 });
+	assert.deepEqual(parseCadence("1m"), { cadenceMs: 60_000 });
+	assert.equal(parseCadence("soon").error, "Cadence must be a non-negative duration such as 500ms, 5s, or 1m.");
+	assert.equal(formatCadence(5_000), "5s");
+});
 
 test("parseTokenBudget returns trimmed objective with no budget", () => {
 	assert.deepEqual(parseTokenBudget("  finish the migration  "), {

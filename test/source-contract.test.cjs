@@ -33,6 +33,12 @@ test("update_goal remains completion-only in schema and guidance", () => {
 	assert.match(indexSource, /Do not use update_goal to pause, resume, abandon, or budget-limit a goal/);
 });
 
+test("active agents can configure continuation cadence", () => {
+	assert.match(indexSource, /name: "set_goal_cadence"/);
+	assert.match(indexSource, /ACTIVE_GOAL_TOOL_NAMES = \["get_goal", "set_goal_cadence", "update_goal"\]/);
+	assert.match(readme, /`set_goal_cadence` tool: let the active agent adjust/);
+});
+
 test("README documents the model-set goal and completion accounting contracts", () => {
 	assert.match(readme, /`create_goal` tool: model can set or replace the current goal only when explicitly requested/);
 	assert.match(readme, /The final turn is still accounted even when the model completes the goal mid-turn/);
