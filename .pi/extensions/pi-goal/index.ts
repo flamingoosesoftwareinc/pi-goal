@@ -256,6 +256,10 @@ export default function piGoal(pi: ExtensionAPI) {
 					type: "number",
 					description: "Optional positive token budget for the goal, only when explicitly requested.",
 				},
+				cadence: {
+					type: "string",
+					description: "Optional trailing-edge continuation delay such as 500ms, 5s, or 1m.",
+				},
 			},
 			required: ["objective"],
 			additionalProperties: false,
@@ -269,12 +273,19 @@ export default function piGoal(pi: ExtensionAPI) {
 			if (parsedBudget.error) {
 				return { content: [{ type: "text", text: parsedBudget.error }], isError: true };
 			}
+			const parsedCadence = params.cadence === undefined
+				? { cadenceMs: continuationCadenceMs }
+				: parseCadence(typeof params.cadence === "string" ? params.cadence : "");
+			if (parsedCadence.error) {
+				return { content: [{ type: "text", text: parsedCadence.error }], isError: true };
+			}
+			continuationCadenceMs = parsedCadence.cadenceMs;
 			const next = createGoalState(objective, parsedBudget.tokenBudget);
 			persist(pi, ctx, next);
 			emitGoalEvent(pi, "active", next, { triggerTurn: ctx.isIdle() });
 			return {
-				content: [{ type: "text", text: JSON.stringify({ goal: next, remainingTokens: next.tokenBudget }, null, 2) }],
-				details: { goal: next },
+				content: [{ type: "text", text: JSON.stringify({ goal: next, remainingTokens: next.tokenBudget, cadence: formatCadence(continuationCadenceMs), cadenceMs: continuationCadenceMs }, null, 2) }],
+				details: { goal: next, cadenceMs: continuationCadenceMs },
 			};
 		},
 	});

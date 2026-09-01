@@ -27,6 +27,13 @@ test("create_goal uses upsert semantics for explicitly requested goals", () => {
 	assert.doesNotMatch(indexSource, /This thread already has a goal/);
 });
 
+test("create_goal accepts and persists an optional validated cadence", () => {
+	assert.match(indexSource, /name: "create_goal"[\s\S]*cadence: \{[\s\S]*Optional trailing-edge continuation delay/);
+	assert.match(indexSource, /params\.cadence === undefined[\s\S]*parseCadence/);
+	assert.match(indexSource, /continuationCadenceMs = parsedCadence\.cadenceMs;[\s\S]*persist\(pi, ctx, next\)/);
+	assert.match(readme, /`create_goal` accepts an optional `cadence` duration/);
+});
+
 test("update_goal remains completion-only in schema and guidance", () => {
 	assert.match(indexSource, /name: "update_goal"/);
 	assert.match(indexSource, /enum: \["complete"\]/);

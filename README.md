@@ -47,6 +47,7 @@ The same Pi agent keeps running normal turns in the same session context until i
 - `/goal statusbar on|off`: show or hide the footer status line
 - `/goal cadence <duration>`: set the trailing-edge continuation delay (`500ms`, `5s`, or `1m`; default `5s`)
 - `create_goal` tool: model can set or replace the current goal only when explicitly requested
+- `create_goal` accepts an optional `cadence` duration so creation and continuation timing are atomic
 - `get_goal` tool: read current goal state
 - `set_goal_cadence` tool: let the active agent adjust its trailing-edge continuation delay
 - `update_goal` tool: model can only mark the goal `complete`
