@@ -26,7 +26,7 @@ A strong goal includes six parts:
 
 ## Workflow
 
-1. Default to Pi `pi-goal`. Write a Pi-compatible `/goal` command unless the user explicitly asks for another harness. The goal body can usually be reused in Codex Goal mode; Pi also supports optional token budgets such as `/goal --tokens 50k ...`.
+1. Default to Pi `pi-goal`. Write a Pi-compatible `/goal` command unless the user asks for another harness. The goal body can usually be reused in Codex Goal mode. The `create_goal` tool also accepts optional `tokenBudget` and `cadence` values. Cadence examples are `500ms`, `5s`, and `1m`; omit it to keep the configured cadence.
 2. Gather context before drafting when the task depends on a repository, issue, test suite, benchmark, PR, design, or external documentation. Read the relevant files or sources instead of inventing the verification surface.
 3. Ask at most three clarifying questions only when missing information changes the goal contract. Prefer making safe assumptions explicit when the user is trying to move quickly.
 4. Draft the goal as a single pasteable command, then include a short rationale or checklist showing how the six parts are covered.
