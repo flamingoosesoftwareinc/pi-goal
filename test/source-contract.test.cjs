@@ -30,7 +30,7 @@ test("create_goal uses upsert semantics for explicitly requested goals", () => {
 test("create_goal accepts and persists an optional validated cadence", () => {
 	assert.match(indexSource, /name: "create_goal"[\s\S]*cadence: \{[\s\S]*Optional trailing-edge continuation delay/);
 	assert.match(indexSource, /params\.cadence === undefined[\s\S]*parseCadence/);
-	assert.match(indexSource, /continuationCadenceMs = parsedCadence\.cadenceMs;[\s\S]*persist\(pi, ctx, next\)/);
+	assert.match(indexSource, /continuationCadenceMs = parsedCadence\.cadenceMs;[\s\S]*persist\(ctx, next\)/);
 	assert.match(readme, /`create_goal` accepts an optional `cadence` duration/);
 });
 

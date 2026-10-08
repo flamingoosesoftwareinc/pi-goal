@@ -73,7 +73,7 @@ The model is instructed to audit completion against real evidence before calling
 
 ## State
 
-Goal state is stored as Pi custom session entries with `customType: "pi-goal"`. It follows the active session branch, survives reloads, and does not require an external database.
+Goal state is stored as Pi custom session entries with `customType: "pi-goal"`. Each session has its own goal, usage, settings, and continuation timer; a new session starts without a goal. State follows the active session branch and survives reloads without an external database.
 
 ## License
 
