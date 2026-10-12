@@ -159,3 +159,20 @@ test("continuation retries until the session is idle with no pending messages", 
 	t.mock.timers.tick(1_000);
 	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active", "continuation"]);
 });
+
+test("an overdue continuation fires when the blocking agent settles", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const s = session();
+	s.start();
+	await s.create("finish the task", "30m");
+	s.ctx.isIdle = () => false;
+	s.handlers.get("agent_settled")({}, s.ctx);
+	t.mock.timers.tick(30 * 60_000);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active"]);
+
+	s.ctx.isIdle = () => true;
+	s.handlers.get("agent_settled")({}, s.ctx);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active", "continuation"]);
+	t.mock.timers.tick(1_000);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active", "continuation"]);
+});

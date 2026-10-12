@@ -19,6 +19,7 @@ import { tokenDeltaFromUsage, type UsageSnapshot } from "./usage";
 
 const CUSTOM_TYPE = "pi-goal";
 const EVENT_TYPE = "pi-goal-event";
+const CONTINUATION_RETRY_MS = 1_000;
 
 // The `content` field is what the LLM sees in the conversation history.
 // Every goal event MUST carry actionable text — never a cryptic marker.
@@ -140,6 +141,7 @@ export default function piGoal(pi: ExtensionAPI) {
 	let activeTurnStartedAt: number | null = null;
 	let activeGoalThisTurnId: string | null = null;
 	let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+	let continuationDue = false;
 	let continuationCadenceMs = 5_000;
 
 	function updateStatusBar(ctx: ExtensionContext) {
@@ -159,11 +161,13 @@ export default function piGoal(pi: ExtensionAPI) {
 	function cancelContinuation() {
 		if (continuationTimer) clearTimeout(continuationTimer);
 		continuationTimer = null;
+		continuationDue = false;
 	}
 
 	function persist(ctx: ExtensionContext, next: GoalState | null) {
+		const goalIdChanged = goal?.id !== next?.id;
 		goal = next;
-		if (next?.status !== "active") {
+		if (next?.status !== "active" || goalIdChanged) {
 			cancelContinuation();
 		}
 		pi.appendEntry(CUSTOM_TYPE, { goal: next, statusBarEnabled, continuationCadenceMs });
@@ -176,13 +180,29 @@ export default function piGoal(pi: ExtensionAPI) {
 		updateStatusBar(ctx);
 	}
 
+	function attemptContinuation(state: GoalState, ctx: ExtensionContext) {
+		if (!goal || goal.id !== state.id || goal.status !== "active") {
+			continuationDue = false;
+			return;
+		}
+		if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+			continuationDue = true;
+			continuationTimer = setTimeout(() => {
+				continuationTimer = null;
+				attemptContinuation(state, ctx);
+			}, CONTINUATION_RETRY_MS);
+			return;
+		}
+		continuationDue = false;
+		emitGoalEvent(pi, "continuation", goal, { triggerTurn: true, deliverAs: "followUp" });
+	}
+
 	function queueContinuation(state: GoalState, ctx: ExtensionContext) {
 		if (state.status !== "active") return;
 		cancelContinuation();
 		continuationTimer = setTimeout(() => {
 			continuationTimer = null;
-			if (!goal || goal.id !== state.id || goal.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
-			emitGoalEvent(pi, "continuation", goal, { triggerTurn: true, deliverAs: "followUp" });
+			attemptContinuation(state, ctx);
 		}, continuationCadenceMs);
 	}
 
@@ -509,7 +529,14 @@ export default function piGoal(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", (_event, ctx) => {
-		if (!goal || goal.status !== "active" || ctx.hasPendingMessages()) return;
+		if (!goal || goal.status !== "active") return;
+		if (continuationDue) {
+			if (continuationTimer) clearTimeout(continuationTimer);
+			continuationTimer = null;
+			attemptContinuation(goal, ctx);
+			return;
+		}
+		if (ctx.hasPendingMessages()) return;
 		queueContinuation(goal, ctx);
 	});
 

@@ -8,7 +8,7 @@ const indexSource = readFileSync(join(__dirname, "../.pi/extensions/pi-goal/inde
 test("persisting a non-active goal cancels any queued continuation", () => {
 	assert.match(
 		indexSource,
-		/if \(next\?\.status !== "active"\) \{\s*cancelContinuation\(\);\s*\}/,
+		/if \(next\?\.status !== "active" \|\| goalIdChanged\) \{\s*cancelContinuation\(\);\s*\}/,
 	);
 });
 
