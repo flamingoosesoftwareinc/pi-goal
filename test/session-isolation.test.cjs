@@ -138,3 +138,24 @@ test("/goal cadence resets the delay of an already scheduled continuation", asyn
 	t.mock.timers.tick(30 * 60_000);
 	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active", "continuation"]);
 });
+
+test("continuation retries until the session is idle with no pending messages", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const s = session();
+	s.start();
+	await s.create("finish the task", "10ms");
+	s.handlers.get("agent_settled")({}, s.ctx);
+
+	s.ctx.isIdle = () => false;
+	t.mock.timers.tick(10);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active"]);
+
+	s.ctx.isIdle = () => true;
+	s.ctx.hasPendingMessages = () => true;
+	t.mock.timers.tick(1_000);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active"]);
+
+	s.ctx.hasPendingMessages = () => false;
+	t.mock.timers.tick(1_000);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active", "continuation"]);
+});
