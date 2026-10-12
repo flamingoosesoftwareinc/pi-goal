@@ -404,6 +404,7 @@ export default function piGoal(pi: ExtensionAPI) {
 				}
 				continuationCadenceMs = parsed.cadenceMs;
 				persistSettings(ctx);
+				if (goal?.status === "active" && ctx.isIdle()) queueContinuation(goal, ctx);
 				ctx.ui.notify(`Goal cadence set to ${formatCadence(continuationCadenceMs)}.`, "info");
 				return;
 			}
