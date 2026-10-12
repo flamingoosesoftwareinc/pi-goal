@@ -123,3 +123,18 @@ test("one instance's continuation cannot use another instance's goal", async (t)
 	]);
 	assert.deepEqual(b.messages.map((message) => message.details.kind), ["active", "paused"]);
 });
+
+test("/goal cadence resets the delay of an already scheduled continuation", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const s = session();
+	s.start();
+	await s.create("finish the task", "30m");
+	s.ctx.isIdle = () => true;
+	s.handlers.get("agent_settled")({}, s.ctx);
+	await s.commands.get("goal").handler("cadence 60m", s.ctx);
+
+	t.mock.timers.tick(30 * 60_000);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active"]);
+	t.mock.timers.tick(30 * 60_000);
+	assert.deepEqual(s.messages.map((message) => message.details.kind), ["active", "continuation"]);
+});
